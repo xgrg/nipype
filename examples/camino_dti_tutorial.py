@@ -130,7 +130,7 @@ inputnode = pe.Node(interface=util.IdentityInterface(fields=["dwi", "bvecs", "bv
 convert nifti DWI to camino raw format
 """
 
-image2voxel = pe.Node(interface=camino.image2voxel(), name="image2voxel")
+image2voxel = pe.Node(interface=camino.Image2Voxel(), name="image2voxel")
 
 """
 convert bvecs and bvals to camino scheme format
