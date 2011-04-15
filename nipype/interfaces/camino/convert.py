@@ -321,4 +321,243 @@ class TractShredder(StdOutCommandLine):
 
     def _gen_outfilename(self):
         _, name , _ = split_filename(self.inputs.in_file)
-        return name + '_shredded'
+        return name + "_shredded"
+
+class DT2NIfTIInputSpec(CommandLineInputSpec):
+    in_file = File(exists=True, argstr='-inputfile %s', mandatory=True, position=1,
+        desc='tract file')
+
+    output_root = File(argstr='-outputroot %s', position=2, genfile=True,
+        desc='filename root prepended onto the names of three output files.')
+
+    header_file = File(exists=True, argstr='-header %s', mandatory=True, position=3,
+        desc=' A Nifti .nii or .hdr file containing the header information')
+
+class DT2NIfTIOutputSpec(TraitedSpec):
+    dt = File(exists=True, desc='diffusion tensors in NIfTI format')
+
+    exitcode = File(exists=True, desc='exit codes from Camino reconstruction in NIfTI format')
+
+    lns0 = File(exists=True, desc='estimated lns0 from Camino reconstruction in NIfTI format')
+
+
+class DT2NIfTI(CommandLine):
+    """
+    Converts camino tensor data to NIfTI format
+
+    Reads Camino diffusion tensors, and converts them to NIFTI format as three .nii files.
+    """
+    _cmd = 'dt2nii'
+    input_spec=DT2NIfTIInputSpec
+    output_spec=DT2NIfTIOutputSpec
+
+    def _list_outputs(self):
+        outputs = self.output_spec().get()
+        output_root = self._gen_outputroot()
+        outputs["dt"] = os.path.abspath(output_root + "dt.nii")
+        outputs["exitcode"] = os.path.abspath(output_root + "exitcode.nii")
+        outputs["lns0"] = os.path.abspath(output_root + "lns0.nii")
+        return outputs
+
+    def _gen_outfilename(self):
+        return self._gen_outputroot()
+
+    def _gen_outputroot(self):
+        output_root = self.inputs.output_root
+        if not isdefined(output_root):
+            output_root = self._gen_filename('output_root')
+        return output_root
+
+    def _gen_filename(self, name):
+        if name == 'output_root':
+            _, filename , _ = split_filename(self.inputs.in_file)
+            filename = filename + "_"
+        return filename
+
+class NIfTIDT2CaminoInputSpec(StdOutCommandLineInputSpec):
+    in_file = File(exists=True, argstr='-inputfile %s', mandatory=True, position=1,
+        desc='A NIFTI-1 dataset containing diffusion tensors. The tensors are assumed to be '
+        'in lower-triangular order as specified by the NIFTI standard for the storage of '
+        'symmetric matrices. This file should be either a .nii or a .hdr file.')
+
+    s0_file = File(argstr='-s0 %s', exists=True,
+        desc='File containing the unweighted signal for each voxel, may be a raw binary '
+        'file (specify type with -inputdatatype) or a supported image file.')
+
+    lns0_file = File(argstr='-lns0 %s', exists=True,
+        desc='File containing the log of the unweighted signal for each voxel, may be a '
+        'raw binary file (specify type with -inputdatatype) or a supported image file.')
+
+    bgmask = File(argstr='-bgmask %s', exists=True,
+        desc='Binary valued brain / background segmentation, may be a raw binary file '
+        '(specify type with -maskdatatype) or a supported image file.')
+
+    scaleslope = traits.Float(argstr='-scaleslope %s',
+        desc='A value v in the diffusion tensor is scaled to v * s + i. This is '
+        'applied after any scaling specified by the input image. Default is 1.0.')
+
+    scaleinter = traits.Float(argstr='-scaleinter %s',
+        desc='A value v in the diffusion tensor is scaled to v * s + i. This is '
+        'applied after any scaling specified by the input image. Default is 0.0.')
+
+    uppertriangular = traits.Bool(argstr='-uppertriangular %s',
+        desc = 'Specifies input in upper-triangular (VTK style) order.')
+
+class NIfTIDT2CaminoOutputSpec(TraitedSpec):
+    out_file = File(desc='diffusion tensors data in Camino format')
+
+class NIfTIDT2Camino(CommandLine):
+    """
+    Converts NIFTI-1 diffusion tensors to Camino format. The program reads the
+    NIFTI header but does not apply any spatial transformations to the data. The
+    NIFTI intensity scaling parameters are applied.
+
+    The output is the tensors in Camino voxel ordering: [exit, ln(S0), dxx, dxy,
+    dxz, dyy, dyz, dzz].
+
+    The exit code is set to 0 unless a background mask is supplied, in which case
+    the code is 0 in brain voxels and -1 in background voxels.
+
+    The value of ln(S0) in the output is taken from a file if one is supplied,
+    otherwise it is set to 0.
+
+    NOTE FOR FSL USERS - FSL's dtifit can output NIFTI tensors, but they are not
+    stored in the usual way (which is using NIFTI_INTENT_SYMMATRIX). FSL's
+    tensors follow the ITK / VTK "upper-triangular" convention, so you will need
+    to use the -uppertriangular option to convert these correctly.
+
+    """
+    _cmd = 'niftidt2camino'
+    input_spec=NIfTIDT2CaminoInputSpec
+    output_spec=NIfTIDT2CaminoOutputSpec
+
+    def _list_outputs(self):
+        outputs = self.output_spec().get()
+        outputs["out_file"] = self._gen_filename('out_file')
+        return outputs
+
+    def _gen_filename(self, name):
+        if name == 'out_file':
+            _, filename , _ = split_filename(self.inputs.in_file)
+        return filename
+
+class AnalyzeHeaderInputSpec(StdOutCommandLineInputSpec):
+    in_file = File(exists=True, argstr='< %s', mandatory=True, position=1,
+        desc='Tensor-fitted data filename') # Took out < %s from argstr
+
+    scheme_file = File(exists=True, argstr='%s', mandatory=False, position=2,
+        desc='Camino scheme file (b values / vectors, see camino.fsl2scheme)')
+
+    readheader = File(exists=True, argstr='-readheader %s',
+        mandatory=False, position=3,
+        desc='Reads header information from file and prints to stdout. If this option is not' \
+        'specified, then the program writes a header based on the other arguments.')
+
+    printimagedims = File(exists=True, argstr='-printimagedims %s',
+        mandatory=False, position=3,
+        desc='Prints image data and voxel dimensions as Camino arguments and exits.')
+
+    # How do we implement both file and enum (for the program) in one argument? Is this option useful anyway?
+    #-printprogargs <file> <prog>
+    #Prints data dimension (and type, if relevant) arguments for a specific Camino program, where prog is one of shredder, scanner2voxel, vcthreshselect, pdview, track.
+    printprogargs = File(exists=True, argstr='-printprogargs %s',
+        mandatory=False, position=3,
+        desc='Prints data dimension (and type, if relevant) arguments for a specific Camino' \
+        'program, where prog is one of shredder, scanner2voxel, vcthreshselect, pdview, track.')
+
+    printintelbyteorder = File(exists=True, argstr='-printintelbyteorder %s',
+        mandatory=False, position=3,
+        desc='Prints 1 if the header is little-endian, 0 otherwise.')
+
+    printbigendian = File(exists=True, argstr='-printbigendian %s',
+        mandatory=False, position=3,
+        desc='Prints 1 if the header is big-endian, 0 otherwise.')
+
+    initfromheader = File(exists=True, argstr='-initfromheader %s',
+        mandatory=False, position=3,
+        desc='Reads header information from file and intializes a new header with the values' \
+        'read from the file. You may replace any combination of fields in the new header by specifying'\
+        'subsequent options.')
+
+    data_dims = traits.List(traits.Int, desc = 'data dimensions in voxels',
+        argstr='-datadims %s', minlen=3, maxlen=3, units='voxels')
+
+    voxel_dims = traits.List(traits.Float, desc = 'voxel dimensions in mm',
+        argstr='-voxeldims %s', minlen=3, maxlen=3, units='mm')
+
+    centre = traits.List(traits.Int, desc = 'Voxel specifying origin of Talairach coordinate system for SPM, default \
+        [0 0 0].', argstr='-centre %s', minlen=3, maxlen=3, units='mm')
+
+    picoseed = traits.List(traits.Int, desc = 'Voxel specifying the seed (for PICo maps), default [0 0 0].',
+        argstr='-picoseed %s', minlen=3, maxlen=3, units='mm')
+
+    nimages = traits.Int(argstr='-nimages %d', units='NA',
+        desc="Number of images in the img file. Default 1.")
+
+    datatype = traits.Enum('byte', 'char', '[u]short', '[u]int', 'float', 'complex', 'double',
+        argstr='-datatype %s',
+        desc='The char datatype is 8 bit (not the 16 bit char of Java), as specified by the Analyze 7.5 standard. \
+     The byte, ushort and uint types are not part of the Analyze specification but are supported by SPM.', mandatory=True)
+
+    offset = traits.Int(argstr='-offset %d', units='NA',
+        desc='According to the Analyze 7.5 standard, this is the byte offset in the .img file' \
+        'at which voxels start. This value can be negative to specify that the absolute value is' \
+        'applied for every image in the file.')
+
+    greylevels = traits.List(traits.Int, desc = 'Minimum and maximum greylevels. Stored as shorts in the header.',
+        argstr='-gl %s', minlen=2, maxlen=2, units='NA')
+
+    scaleslope = traits.Float(argstr='-scaleslope %d', units='NA',
+        desc='Intensities in the image are scaled by this factor by SPM and MRICro. Default is 1.0.')
+
+    scaleinter = traits.Float(argstr='-scaleinter %d', units='NA',
+        desc='Constant to add to the image intensities. Used by SPM and MRIcro.')
+
+    description = traits.String(argstr='-description %s',
+        desc='Short description - No spaces, max length 79 bytes. Will be null terminated automatically.')
+
+    intelbyteorder = traits.Bool(argstr='-intelbyteorder',
+        desc="Write header in intel byte order (little-endian).")
+
+    networkbyteorder = traits.Bool(argstr='-networkbyteorder',
+        desc="Write header in network byte order (big-endian). This is the default for new headers.")
+
+class AnalyzeHeaderOutputSpec(TraitedSpec):
+    header = File(exists=True, desc='Analyze header')
+
+class AnalyzeHeader(StdOutCommandLine):
+    """
+    Create or read an Analyze 7.5 header file.
+
+    Analyze image header, provides support for the most common header fields.
+    Some fields, such as patient_id, are not currently supported. The program allows
+    three nonstandard options: the field image_dimension.funused1 is the image scale.
+    The intensity of each pixel in the associated .img file is (image value from file) * scale.
+    Also, the origin of the Talairach coordinates (midline of the anterior commisure) are encoded
+    in the field data_history.originator. These changes are included for compatibility with SPM.
+
+    All headers written with this program are big endian by default.
+
+    Example
+    -------
+
+    >>> import nipype.interfaces.camino as cmon
+    >>> hdr = cmon.AnalyzeHeader()
+    >>> hdr.inputs.in_file = 'tensor_fitted_data.Bfloat'
+    >>> hdr.inputs.scheme_file = 'A.scheme'
+    >>> hdr.inputs.data_dims = [256,256,256]
+    >>> hdr.inputs.voxel_dims = [1,1,1]
+    >>> hdr.run()                  # doctest: +SKIP
+    """
+    _cmd = 'analyzeheader'
+    input_spec=AnalyzeHeaderInputSpec
+    output_spec=AnalyzeHeaderOutputSpec
+
+    def _list_outputs(self):
+        outputs = self.output_spec().get()
+        outputs['header'] = os.path.abspath(self._gen_outfilename())
+        return outputs
+
+    def _gen_outfilename(self):
+        _, name , _ = split_filename(self.inputs.in_file)
+        return name + ".hdr"
