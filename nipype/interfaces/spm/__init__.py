@@ -10,6 +10,6 @@ from .preprocess import (SliceTiming, Realign, Coregister, Normalize,
                          DARTELNorm2MNI, CreateWarped, VBMSegment)
 from .model import (Level1Design, EstimateModel, EstimateContrast, Threshold,
                     OneSampleTTestDesign, TwoSampleTTestDesign,
-                    PairedTTestDesign, MultipleRegressionDesign)
+                    PairedTTestDesign, MultipleRegressionDesign, FullFactorialDesign)
 from .utils import (Analyze2nii, CalcCoregAffine, ApplyTransform, Reslice,
                     ApplyInverseDeformation, ResliceToReference, DicomImport)

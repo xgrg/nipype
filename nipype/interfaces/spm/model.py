@@ -889,6 +889,49 @@ class FactorialDesign(SPMCommand):
         outputs['spm_mat_file'] = spm
         return outputs
 
+class FullFactorialDesignInputSpec(FactorialDesignInputSpec):
+    spm_mat_dir = Directory(exists=True, field='dir',
+                            desc='directory to store SPM.mat file (opt)')
+
+    factors = traits.Dict(key_trait=traits.Enum('name', 'levels', 'dept',
+                          'variance', 'gmsca', 'ancova'),
+                          field='des.fd.fact',
+                          desc='factors dictionary {name, levels, dept, '
+                          'variance, gmsca, ancova}')
+
+    cells = InputMultiPath(traits.Dict(key_trait=traits.Enum('scans', 'levels')),
+                                field='des.fd.icell',
+                                desc='cells dictionary {scans, levels}')
+
+    contrasts = traits.Bool(field='des.fd.contrasts', desc='contrasts')
+
+class FullFactorialDesign(FactorialDesign):
+    input_spec = FullFactorialDesignInputSpec
+    _jobname = 'factorial_design'
+
+    def _format_arg(self, opt, spec, val):
+        """Convert input to appropriate format for spm
+        """
+        if opt in ['cells']:
+            outlist = []
+            for dictitem in val:
+                outdict = {}
+                outdict['levels'] = dictitem['levels']
+                outdict['scans'] = np.array(dictitem['scans'], dtype=object)
+                outlist.append(outdict)
+            return outlist
+        if opt in ['user_covariates']:
+            outlist = []
+            mapping = {'name': 'cname', 'vector': 'c',
+                       'centering': 'iCC'}
+            for dictitem in val:
+                outdict = {}
+                for key, keyval in list(dictitem.items()):
+                    outdict[mapping[key]] = keyval
+                outlist.append(outdict)
+            return outlist
+        return (super(FullFactorialDesign, self)
+                ._format_arg(opt, spec, val))
 
 class OneSampleTTestDesignInputSpec(FactorialDesignInputSpec):
     in_files = traits.List(File(exists=True), field='des.t1.scans',
